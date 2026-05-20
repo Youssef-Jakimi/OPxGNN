@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pkl
+*.log
+
+# Environnements
+.venv/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Outils
+.vscode/
+.idea/
+
+# Données (brutes volumineuses)
+dataset/LD2011_2014.txt
+
+# Données générées
+data/processed/
+outputs/
