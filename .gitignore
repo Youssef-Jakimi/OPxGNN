@@ -18,9 +18,11 @@ ENV/
 .vscode/
 .idea/
 
-# Données (brutes volumineuses)
-dataset/LD2011_2014.txt
+# Données (brutes et générées)
+dataset/**
+!dataset/README.md
 
 # Données générées
 data/processed/
 outputs/
+

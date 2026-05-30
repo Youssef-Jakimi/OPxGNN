@@ -1,10 +1,14 @@
-# Dataset (non versionné)
 
-Le fichier `LD2011_2014.txt` fait ~711 MB et ne peut pas être poussé sur GitHub (limite de taille).
 
-## Comment l’obtenir
-- Télécharger le dataset *Electricity Load Diagrams 2011–2014* (UCI Machine Learning Repository)
-- Placer le fichier ici : `dataset/LD2011_2014.txt`
+## data prétraitée  à telechrger depuis google drive 
+https://drive.google.com/drive/folders/1xTA5Id8-9_bGHircURcbb0-EOx8rVWPC?usp=sharing
 
-## Option (si vous voulez versionner le dataset)
-Utilisez Git LFS (non recommandé pour les forks/étudiants si vous n’êtes pas à l’aise avec LFS).
+  ### placez le fichier de data pré traité (juste le dossier dataelectricity) dans :
+     dataset/
+
+## télécharger ce dossier depuis google drive 
+https://drive.google.com/drive/folders/17KKj0Agf3A_GDaKyKSMRpKhMrAllCWYQ?usp=sharing
+  
+  ## placez le dans :
+    OPxGNN/
+    (de cette forme OPxGNN/data/processed/)
