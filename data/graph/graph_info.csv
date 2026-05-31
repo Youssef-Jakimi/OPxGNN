@@ -1,0 +1,6 @@
+parametre,valeur
+seuil_correlation,0.85
+n_noeuds,348.0
+n_aretes,9442.0
+densite,0.1564
+noeuds_isoles,46.0
