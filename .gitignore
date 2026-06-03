@@ -24,5 +24,6 @@ dataset/**
 
 # Données générées
 data/processed/
+data/graph/
 outputs/
 
