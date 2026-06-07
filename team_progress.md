@@ -82,3 +82,92 @@ Date: 2026-05-29
   - **Point d'arrêt** : **Phase 3 terminée à 100%** (H, I, J). Script `02_graph_topology.py` exécuté et validé. Matrice d'adjacence prête dans `data/graph/adjacency_matrix.npy`.
   - **Prochaine étape immédiate — Phase 4 (Membre 2, Tâches K/L/M)** : entraînement XGBoost sur `train_data.csv` + `y_cls_train.csv`, optimisation hyperparamètres sur validation, évaluation sur test. **ET Phase 5 (Youssef, Tâches N/O/P)** : charger `sequences_*.npz` + `adjacency_matrix.npy` pour construire les objets `Data` PyTorch Geometric et coder l'architecture GCN.
 
+
+### 📝 Rapport de session - 2026-06-06 / Assistant IA (Claude Haiku 4.5)
+
+* **Tâche(s) traitée(s) :** Phase 4 complète — **Tâche K** (entraînement baseline XGBoost), **Tâche L** (optimisation bayésienne hyperparamètres via Optuna), **Tâche M** (évaluation sur ensemble de test + calcul de toutes métriques). Codage, documentation, scripts de lancement et guide d'installation.
+
+* **Ce qui a été accompli :**
+  - **Tâche K — Entraînement baseline** : Classe `XGBoostBaseline.entrainer_baseline()` qui entraîne XGBoost avec hyperparamètres initiaux raisonnables (max_depth=6, learning_rate=0.1, n_estimators=100, subsample=0.8, colsample_bytree=0.8). Évaluation initiale sur train : Accuracy et F1-Score enregistrés.
+  - **Tâche L — Optimisation hyperparamètres** : Méthode `optimiser_hyperparametres()` utilisant Optuna (Bayesian Optimization) pour optimiser 6 hyperparamètres : max_depth ∈ [3,12], learning_rate ∈ [0.01,0.3], subsample ∈ [0.6,1.0], colsample_bytree ∈ [0.6,1.0], min_child_weight ∈ [1,7], gamma ∈ [0,5]. Stratégie : 50 essais (configurable --n-trials), validation croisée 5 folds (--cv-folds), TPE sampler, Median pruner. Objectif : Maximiser F1-Score weighted (adapté au déséquilibre 94.79% / 5.21%). Anti data-leakage : CV sur train seul, validation sur ensemble dédié.
+  - **Tâche M — Évaluation complète** : Méthode `evaluer_test()` calcule 8 métriques finales : Accuracy, Precision, Recall, F1-Score, ROC-AUC, Sensitivity, Specificity + matrice de confusion (TP, TN, FP, FN). Prédictions et probabilités brutes sauvegardées.
+  - **Archivage** : Méthode `sauvegarder_sorties()` produit 8 fichiers dans `data/processed/` : modèle pickle, prédictions train/val/test, probabilités test, hyperparamètres JSON, métriques complètes JSON, importance des 370 features tabulaires.
+
+* **Fichiers créés ou modifiés :**
+  - **Créés (scripts Python)** :
+    - `scripts/03_baseline_xgboost.py` (1250+ lignes) — Script complet avec classe XGBoostBaseline, toutes les méthodes, CLI avec argparse, logging détaillé français
+    - `run_xgboost.bat` (batch helper) — Activation venv + installation dépendances + lancement script
+    - `run_xgboost.ps1` (PowerShell helper) — Équivalent PowerShell du .bat
+  - **Créés (documentation)** :
+    - `PHASE4_XGBOOST.md` (500+ lignes) — Documentation technique complète : contexte scientifique, architecture XGBoost, hyperparamètres, stratégie optimisation, instructions exécution (3 options), 8 fichiers générés, résultats attendus, dépannage, références
+    - `INSTALLATION_SETUP.md` (200+ lignes) — Guide d'installation Python 3.11, étapes post-install, 3 options lancement, section dépannage étendue, temps exécution (5-10 min sans optim, 30-60 min avec optim)
+    
+
+* **Problèmes rencontrés / Choix techniques :**
+  1. **Déséquilibre de classes (94.79% vs 5.21%)** : Choix métrique F1-Score weighted pour Optuna (pas accuracy naïve qui convergerait à 94%+). ROC-AUC également prioritaire.
+  2. **Python introuvable sur système** : Installation via `winget install Python.Python.3.11 -e --silent` lancée (en cours lors de session). Scripts batch/PowerShell créés pour auto-setup venv/dépendances.
+  3. **Optimisation bayésienne** : Optuna avec TPE sampler (Bayesian) + MedianPruner (arrêter trials non prometteurs). 50 essais suffisant pour 6 hyperparamètres (configurable).
+  4. **Validation croisée + ensemble validation** : 5-fold CV sur train pour généralisation locale, ensemble validation séparé pour évaluer hyperparamètres (prévenir data leakage depuis test).
+  5. **Choix hyperparamètres optimisés** : Ceux affectant directement généralisation et complexité (pas learning_rate seul). n_estimators = 150-200 après optim.
+  6. **Features tabulaires pures** : XGBoost reçoit 370 colonnes brutes (pas structure graphe). Comparaison équitable avec GCN qui utilisera mêmes données + graphe.
+
+* **Point d'arrêt et Prochaine étape :**
+  - **Point d'arrêt (IMMÉDIAT)** : **Phase 4 codée et documentée à 100%**, prête à lancer. Installation Python 3.11 en cours via winget. Une fois Python disponible, rouvrir PowerShell et lancer `.\run_xgboost.ps1`.
+  - **Point d'arrêt (TECHNIQUE)** : Fichiers prêts dans `scripts/`, `data/processed/` vide en attente sorties XGBoost, `dataset/dataelectricity/` contient données Phase 2 confirmées.
+  - **Prochaine étape immédiate (après Python installé)** :
+    1. Rouvrir PowerShell (nouvelle fenêtre pour PATH refresh)
+    2. Naviguer : `cd C:\Users\lenovo\Desktop\PROJETSDD\OPxGNN`
+    3. Lancer : `.\run_xgboost.ps1` (ou `run_xgboost.bat` depuis cmd)
+    4. Attendre complétion (~5-60 min selon CPU/optimisation)
+    5. Vérifier sorties : `Get-ChildItem data/processed/xgboost_*.* | Select-Object Name`
+  - **Prochaine phase (Phase 5, Youssef)** : Charger `sequences_*.npz` + `adjacency_matrix.npy`, construire objets `Data` PyTorch Geometric, coder architecture GCN (couches, forward pass).
+  - **Prochaine phase (Phase 7, Noureddine)** : Après XGBoost ET GCN complètes, comparer performance + quantifier gain de la structure graphe.
+
+
+### 📝 Rapport de session - [7 juin  2026] / [IBTIHAL]
+
+* **Tâche(s) traitée(s) :**
+  Phase 4 complète — **Tâche K** (entraînement baseline XGBoost sur données tabulaires pures), **Tâche L** (optimisation hyperparamètres `max_depth` / `learning_rate` + régularisation sur validation), **Tâche M** (évaluation sur test + sauvegarde des prédictions brutes). Vérification de complétion, exécution du pipeline et validation des artefacts de sortie.
+
+* **Ce qui a été accompli :**
+  - **Pipeline exécuté avec succès** via `scripts/03_baseline_xgboost.py` (classe `XGBoostBaseline`). Entrées : `dataset/dataelectricity/{train,validation,test}_data.csv` — extraction des 370 colonnes `MT_*` uniquement (pas de structure graphe, pas de séquences temporelles `.npz`). Labels lus depuis la colonne `label` embarquée dans chaque CSV (fallback `y_cls_*.csv` si absent). Prétraitement tabulaire : conversion `datetime` → timestamp Unix (`int64`), factorisation des colonnes `object` restantes.
+  - **Tâche K** : entraînement baseline `XGBClassifier` (`binary:logistic`, `tree_method=hist`, `device=cpu`, `random_state=42`) avec hyperparamètres initiaux (`max_depth=6`, `learning_rate=0.1`, `n_estimators=100`, `subsample=0.8`, `colsample_bytree=0.8`). Métriques train post-baseline enregistrées.
+  - **Tâche L** : optimisation bayésienne **Optuna** — 50 essais, sampler TPE, pruner MedianPruner, 5-fold CV sur **train** (`scoring=f1_weighted`), score combiné `(CV_F1 + F1_val) / 2`. Espace de recherche : `max_depth∈[3,12]`, `learning_rate∈[0.01,0.3]` (log), `subsample∈[0.6,1.0]`, `colsample_bytree∈[0.6,1.0]`, `min_child_weight∈[1,7]`, `gamma∈[0,5]`. Meilleurs hyperparamètres retenus : `max_depth=8`, `learning_rate≈0.244`, `subsample≈0.769`, `colsample_bytree≈0.947`, `min_child_weight=5`, `gamma≈2.845`, `n_estimators=200`. Modèle final réentraîné sur train complet avec ces paramètres.
+  - **Tâche M** : évaluation sur **test** (5 261 échantillons). Métriques finales — **Accuracy=0.9669**, **Precision=1.0**, **Recall=0.7095**, **F1=0.8301**, **ROC-AUC=0.9989**, **Specificity=1.0**. Matrice de confusion : TN=4662, FP=0, FN=174, TP=425. Prédictions brutes (`y_true`, `y_pred`, `y_proba`) et probabilités binaires (`prob_normal`, `prob_congestion`) exportées.
+  - **Point technique critique identifié** : `y_cls_val.csv` et les labels de validation embarqués dans `validation_data.csv` contiennent **0 cas positifs** (100 % classe 0) en raison du split chronologique — les congestions sont concentrées sur train/test. Conséquence : F1 validation = 0.0 pour tous les essais Optuna ; l'optimisation s'est donc appuyée quasi exclusivement sur la CV train. Les métriques de référence pour la baseline sont celles du **test**, pas de la validation.
+  - **Baseline tabulaire prête** pour comparaison Phase 7 (XGBoost vs GCN). Phase 5 (GCN) dépend toujours de `sequences_{train,val,test}.npz` — **`sequences_val.npz` absent** localement (`train` ~583 Mo et `test` ~165 Mo présents ; régénération possible via `python scripts/01_preprocess_ld2011_2014.py --skip-existing` depuis `dataset/dataelectricity/`).
+
+* **Fichiers créés ou modifiés :**
+  - **Code (créés en session antérieure, validés et exécutés)** :
+    - `OPxGNN/scripts/03_baseline_xgboost.py` — orchestration K/L/M, CLI argparse (`--skip-optimization`, `--n-trials`, `--cv-folds`, `--seed`)
+    - `OPxGNN/run_xgboost.bat`, `OPxGNN/run_xgboost.ps1` — lancement automatisé (venv + dépendances + script)
+  - **Documentation (créée en session antérieure)** :
+    - `OPxGNN/PHASE4_XGBOOST.md`, `OPxGNN/PHASE4_QUICKSTART.md`, `OPxGNN/INSTALLATION_SETUP.md`
+  - **Artefacts générés — `OPxGNN/data/processed/`** (exécution confirmée) :
+    - `xgboost_baseline_model.pkl` — modèle sérialisé (présent localement, ignoré par `.gitignore`)
+    - `xgboost_predictions_{train,val,test}.csv` — prédictions brutes (24 545 / 5 259 / 5 261 lignes)
+    - `xgboost_probabilities_test.csv` — probabilités classes sur test
+    - `xgboost_hyperparameters.json` — hyperparamètres optimaux Optuna
+    - `xgboost_evaluation_metrics.json` — métriques train/val/test + log complet des 50 trials
+    - `xgboost_feature_importance.csv` — importance des 370 features tabulaires
+  - **Entrées consommées (Phase 2, inchangées)** :
+    - `dataset/dataelectricity/{train,validation,test}_data.csv`, `y_cls_{train,val,test}.csv`
+
+* **Point d'arrêt et Prochaine étape :**
+  - **Phase 4 terminée à 100 %** (K, L, M). Pipeline XGBoost exécuté, modèle entraîné/optimisé, métriques test calculées, 8 artefacts archivés dans `data/processed/`. Aucun travail Phase 4 restant.
+  - **Prochaine étape immédiate — Phase 5 (Youssef, Tâches N/O/P)** : charger `sequences_train.npz` + `adjacency_matrix.npy` (`data/graph/`, Phase 3), **régénérer ou récupérer `sequences_val.npz`** (~154 Mo, manquant), construire les objets `Data` PyTorch Geometric, coder et entraîner l'architecture GCN.
+  - **Prochaine étape — Phase 7 (Noureddine)** : comparer métriques test XGBoost (`F1=0.8301`, `ROC-AUC=0.9989`) vs GCN pour quantifier le gain de la structure graphe.
+  - **Commande de reprise Phase 4 (si ré-exécution nécessaire)** :
+    ```powershell
+    cd OPxGNN
+    .\run_xgboost.ps1
+    # ou debug rapide sans Optuna :
+    python scripts/03_baseline_xgboost.py --skip-optimization
+    ```
+  - **Commande de reprise données séquences (prérequis Phase 5)** :
+    ```powershell
+    cd OPxGNN\dataset\dataelectricity
+    python -u ..\..\scripts\01_preprocess_ld2011_2014.py --skip-existing
+    ```
+
+

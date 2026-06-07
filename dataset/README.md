@@ -12,3 +12,13 @@ https://drive.google.com/drive/folders/17KKj0Agf3A_GDaKyKSMRpKhMrAllCWYQ?usp=sha
   ## placez le dans :
     OPxGNN/
     (de cette forme OPxGNN/data/processed/)
+
+
+
+  07 juin 2026 
+##  telecharger ce  dossier depuis google drive
+https://drive.google.com/drive/folders/1GuDaGdtoOXPf2ByfcvNX9CLEBv_yAY8L?usp=sharing
+  ## placez le dans : 
+   OPxGNN/
+    (de cette forme OPxGNN/data/processed/)
+    
