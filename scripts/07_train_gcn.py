@@ -198,7 +198,7 @@ def main() -> None:
     FULL_TRAINING = True
 
     parser = argparse.ArgumentParser(description="Tâche P: boucle d'entraînement GCN.")
-    parser.add_argument("--epochs", type=int, default=50 if FULL_TRAINING else 2, help="Nombre d'époques.")
+    parser.add_argument("--epochs", type=int, default= 10 if FULL_TRAINING else 2, help="Nombre d'époques.")
     parser.add_argument("--batch-size", type=int, default=32, help="Taille de batch.")
     parser.add_argument("--num-workers", type=int, default=0, help="Workers DataLoader.")
     parser.add_argument("--hidden-channels", type=int, default=64, help="Dimension cachée GCN.")
