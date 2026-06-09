@@ -4,7 +4,7 @@ Pipeline :
 - Charger le fichier texte séparé par ';' (décimales ',')
 - Ré-échantillonner de 15 min à 1 h (moyenne) + fillna
 - Variable cible : charge totale, seuil 95e centile (train), labels 0/1
-- Split strictement chronologique (train/val/test)
+- Split stratifié (train/val/test) pour conserver les classes dans chaque split
 - Normalisation MinMax (fit sur train uniquement)
 - Séquences temporelles (fenêtre 24 h à pas horaire)
 """
@@ -17,6 +17,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 
 # ---------------------------------------------------------------------------
@@ -31,6 +32,7 @@ val_ratio = 0.15
 test_ratio = 0.15
 n_steps = 24  # 24 h de contexte à résolution horaire
 CONGESTION_PERCENTILE = 95
+SPLIT_RANDOM_STATE = 42
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -98,6 +100,78 @@ def build_classification_labels(
     return load_total, threshold, labels
 
 
+def class_counts(labels: np.ndarray | pd.Series) -> dict[int, int]:
+    labels_arr = np.asarray(labels, dtype=np.int64)
+    values, counts = np.unique(labels_arr, return_counts=True)
+    return {int(value): int(count) for value, count in zip(values, counts)}
+
+
+def print_class_distribution(name: str, labels: np.ndarray | pd.Series) -> None:
+    counts = class_counts(labels)
+    print(f"{name.upper()}:")
+    print(f"0={counts.get(0, 0)}")
+    print(f"1={counts.get(1, 0)}")
+
+
+def assert_binary_split(name: str, labels: np.ndarray | pd.Series) -> None:
+    counts = class_counts(labels)
+    if counts.get(0, 0) == 0 or counts.get(1, 0) == 0:
+        raise ValueError(
+            f"Split {name} invalide: il doit contenir les deux classes, "
+            f"recu {counts}."
+        )
+
+
+def validate_split_distributions(split_labels: dict[str, np.ndarray | pd.Series]) -> None:
+    for name, labels_part in split_labels.items():
+        print_class_distribution(name, labels_part)
+        assert_binary_split(name, labels_part)
+
+
+def build_stratified_indices(labels_arr: np.ndarray) -> dict[str, np.ndarray]:
+    labels_arr = np.asarray(labels_arr, dtype=np.int64)
+    if not np.all(np.isin(labels_arr, [0, 1])):
+        raise ValueError(f"Labels non binaires detectes: {class_counts(labels_arr)}")
+
+    counts = class_counts(labels_arr)
+    if len(counts) != 2:
+        raise ValueError(f"Impossible de stratifier: une seule classe presente {counts}.")
+    if min(counts.values()) < 3:
+        raise ValueError(
+            "Impossible de creer train/val/test stratifies: "
+            f"classe minoritaire trop petite {counts}."
+        )
+
+    indices = np.arange(len(labels_arr))
+    temp_ratio = val_ratio + test_ratio
+    train_idx, temp_idx = train_test_split(
+        indices,
+        test_size=temp_ratio,
+        stratify=labels_arr,
+        random_state=SPLIT_RANDOM_STATE,
+        shuffle=True,
+    )
+
+    relative_test_ratio = test_ratio / temp_ratio
+    val_idx, test_idx = train_test_split(
+        temp_idx,
+        test_size=relative_test_ratio,
+        stratify=labels_arr[temp_idx],
+        random_state=SPLIT_RANDOM_STATE,
+        shuffle=True,
+    )
+
+    split_indices = {
+        "train": np.sort(train_idx),
+        "val": np.sort(val_idx),
+        "test": np.sort(test_idx),
+    }
+    validate_split_distributions(
+        {name: labels_arr[idx] for name, idx in split_indices.items()}
+    )
+    return split_indices
+
+
 def save_processed_artifacts(
     df_hourly: pd.DataFrame,
     client_cols: list[str],
@@ -105,6 +179,7 @@ def save_processed_artifacts(
     labels: pd.Series,
     threshold: float,
     train_end: int,
+    train_labels: pd.Series | np.ndarray | None = None,
 ) -> None:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -119,12 +194,14 @@ def save_processed_artifacts(
     )
     labels_out.to_csv(PROCESSED_DIR / "labels_hourly.csv.gz", index=False, compression="gzip")
 
+    labels_for_train_stats = labels.iloc[:train_end] if train_labels is None else train_labels
     thresholds = pd.DataFrame(
         {
             "percentile": [CONGESTION_PERCENTILE],
             "threshold_kw": [threshold],
-            "n_train_samples": [train_end],
-            "n_congested_train": [int(labels.iloc[:train_end].sum())],
+            "n_train_samples": [int(len(labels_for_train_stats))],
+            "n_congested_train": [int(np.asarray(labels_for_train_stats).sum())],
+            "threshold_calibration_samples": [train_end],
         }
     )
     thresholds.to_csv(PROCESSED_DIR / "thresholds.csv", index=False)
@@ -140,6 +217,7 @@ print(f"Répertoire de travail : {WORK_DIR}")
 
 missing_before = 0
 df_normalized = None
+hourly_split_indices = None
 
 if args.sequences_only and (PROCESSED_DIR / "load_hourly.csv.gz").exists():
     print("\nChargement des données horaires traitées (mode sequences-only)...")
@@ -175,7 +253,6 @@ else:
 
     n = len(df_hourly)
     train_end = int(n * train_ratio)
-    val_end = train_end + int(n * val_ratio)
 
     print("\n" + "=" * 50)
     print("TÂCHE F — LABELS DE CLASSIFICATION")
@@ -185,10 +262,15 @@ else:
     )
 
     print("\n" + "=" * 50)
+    print("TÂCHE G — SPLIT STRATIFIÉ HORAIRE")
+    print("=" * 50)
+    hourly_split_indices = build_stratified_indices(labels.to_numpy(dtype=np.int8))
+
+    print("\n" + "=" * 50)
     print("NORMALISATION (fit sur train uniquement)")
     print("=" * 50)
     scaler_minmax = MinMaxScaler()
-    scaler_minmax.fit(df_hourly.iloc[:train_end][client_cols])
+    scaler_minmax.fit(df_hourly.iloc[hourly_split_indices["train"]][client_cols])
     data_normalized = scaler_minmax.transform(df_hourly[client_cols])
     print(
         f"  Plage brute clients : "
@@ -204,21 +286,23 @@ else:
     df_normalized["load_total_kw"] = load_total.values
     df_normalized["label"] = labels.values
 
-    print("\n" + "=" * 50)
-    print("TÂCHE G — SPLIT CHRONOLOGIQUE")
-    print("=" * 50)
-    train_data = df_normalized.iloc[:train_end]
-    val_data = df_normalized.iloc[train_end:val_end]
-    test_data = df_normalized.iloc[val_end:]
+    train_data = df_normalized.iloc[hourly_split_indices["train"]]
+    val_data = df_normalized.iloc[hourly_split_indices["val"]]
+    test_data = df_normalized.iloc[hourly_split_indices["test"]]
     print(f"  Total : {n} | Train : {len(train_data)} | Val : {len(val_data)} | Test : {len(test_data)}")
-    print(f"  Train : {train_data['datetime'].iloc[0]} -> {train_data['datetime'].iloc[-1]}")
-    print(f"  Val   : {val_data['datetime'].iloc[0]} -> {val_data['datetime'].iloc[-1]}")
-    print(f"  Test  : {test_data['datetime'].iloc[0]} -> {test_data['datetime'].iloc[-1]}")
 
     print("\n" + "=" * 50)
     print("SAUVEGARDE")
     print("=" * 50)
-    save_processed_artifacts(df_hourly, client_cols, load_total, labels, threshold, train_end)
+    save_processed_artifacts(
+        df_hourly,
+        client_cols,
+        load_total,
+        labels,
+        threshold,
+        train_end,
+        train_labels=labels.iloc[hourly_split_indices["train"]],
+    )
 
     train_data.to_csv(WORK_DIR / "train_data.csv", index=False)
     val_data.to_csv(WORK_DIR / "validation_data.csv", index=False)
@@ -245,11 +329,17 @@ if df_normalized is None:
     df_normalized["label"] = labels.values
 
 n = len(df_normalized)
-train_end = int(n * train_ratio)
-val_end = train_end + int(n * val_ratio)
-train_data = df_normalized.iloc[:train_end]
-val_data = df_normalized.iloc[train_end:val_end]
-test_data = df_normalized.iloc[val_end:]
+if hourly_split_indices is None:
+    print("\n" + "=" * 50)
+    print("SPLIT STRATIFIÉ HORAIRE")
+    print("=" * 50)
+    hourly_split_indices = build_stratified_indices(
+        df_normalized["label"].to_numpy(dtype=np.int8)
+    )
+
+train_data = df_normalized.iloc[hourly_split_indices["train"]]
+val_data = df_normalized.iloc[hourly_split_indices["val"]]
+test_data = df_normalized.iloc[hourly_split_indices["test"]]
 
 print("\n" + "=" * 50)
 print("SÉQUENCES TEMPORELLES (fenêtre 24 h)")
@@ -276,27 +366,28 @@ def save_flat_csv(path, array, chunk_size=512):
             np.savetxt(handle, chunk, delimiter=",", fmt="%.6f")
 
 
-train_seq_end = int(train_ratio * n_samples)
-val_seq_end = train_seq_end + int(val_ratio * n_samples)
-splits = [
-    ("train", 0, train_seq_end),
-    ("val", train_seq_end, val_seq_end),
-    ("test", val_seq_end, n_samples),
-]
+print("\n" + "=" * 50)
+print("SPLIT STRATIFIÉ DES SÉQUENCES")
+print("=" * 50)
+sequence_split_indices = build_stratified_indices(y_cls)
 
 print("\nExport des séquences :")
-for name, start, end in splits:
+for name, split_idx in sequence_split_indices.items():
     npz_path = WORK_DIR / f"sequences_{name}.npz"
     y_csv_path = WORK_DIR / f"y_{name}.csv"
     y_cls_path = WORK_DIR / f"y_cls_{name}.csv"
 
     if args.skip_existing and npz_path.exists() and y_cls_path.exists():
+        existing_labels = np.load(npz_path)["y_cls"]
         print(f"  {name} : ignoré (déjà présent)")
+        print_class_distribution(name, existing_labels)
+        assert_binary_split(name, existing_labels)
         continue
 
-    X_part = np.ascontiguousarray(windows[start:end].transpose(0, 2, 1))
-    y_reg_part = y_reg[start:end]
-    y_cls_part = y_cls[start:end]
+    X_part = np.ascontiguousarray(windows[split_idx].transpose(0, 2, 1))
+    y_reg_part = y_reg[split_idx]
+    y_cls_part = y_cls[split_idx]
+    assert_binary_split(name, y_cls_part)
     print(f"  {name} : X={X_part.shape}, y_reg={y_reg_part.shape}, y_cls={y_cls_part.shape}")
 
     if not (args.skip_existing and npz_path.exists()):

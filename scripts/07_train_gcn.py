@@ -167,11 +167,20 @@ def verifier_validation(ds_val) -> None:
 
     y_val = np.asarray(ds_val.y, dtype=np.int64)
     if int((y_val == 1).sum()) == 0:
-        print(
-            "[WARN] Validation contient uniquement la classe 0. "
-            "Le F1 de la classe positive sera toujours 0 avec zero_division=0, "
-            "meme si la perte validation est tres faible."
+        raise ValueError(
+            "Validation contient uniquement la classe 0. "
+            "Regenerer sequences_val.npz avec un split stratifie avant l'entrainement."
         )
+
+
+def verifier_split_binaire(nom: str, dataset) -> None:
+    if dataset is None:
+        raise ValueError(f"Split {nom} absent.")
+
+    labels = np.asarray(dataset.y, dtype=np.int64)
+    counts = {int(v): int(c) for v, c in zip(*np.unique(labels, return_counts=True))}
+    if counts.get(0, 0) == 0 or counts.get(1, 0) == 0:
+        raise ValueError(f"Split {nom} invalide: les deux classes sont requises, recu {counts}.")
 
 
 def evaluer_modele(
@@ -334,6 +343,9 @@ def main() -> None:
         afficher_distribution_labels("val", ds_val)
         afficher_distribution_labels("test", ds_test)
     verifier_validation(ds_val)
+    verifier_split_binaire("train", ds_train)
+    verifier_split_binaire("val", ds_val)
+    verifier_split_binaire("test", ds_test)
 
     historique = {
         "config": vars(args),
