@@ -107,18 +107,88 @@ def calculer_poids_classes(ds_train) -> torch.Tensor:
     return torch.tensor(weights, dtype=torch.float32)
 
 
+def afficher_distribution_labels(nom: str, dataset) -> None:
+    if dataset is None:
+        print(f"[DEBUG][{nom}] dataset absent")
+        return
+
+    labels = np.asarray(dataset.y, dtype=np.int64)
+    valeurs, comptes = np.unique(labels, return_counts=True)
+    distribution = {int(v): int(c) for v, c in zip(valeurs, comptes)}
+    print(
+        f"[DEBUG][{nom}] y_unique_counts={distribution} | "
+        f"n={len(labels)} | n_pos={int((labels == 1).sum())} | "
+        f"n_neg={int((labels == 0).sum())}"
+    )
+    if not np.all(np.isin(labels, [0, 1])):
+        print(f"[WARN][{nom}] labels hors encodage binaire 0/1 detectes.")
+    if int((labels == 1).sum()) == 0:
+        print(f"[WARN][{nom}] aucune classe positive: precision/recall/F1 positifs seront non informatifs.")
+
+
+def calculer_metriques_classification(y_true_all, y_pred_all) -> Dict[str, float]:
+    return {
+        "accuracy": float(accuracy_score(y_true_all, y_pred_all)),
+        "precision": float(precision_score(y_true_all, y_pred_all, zero_division=0)),
+        "recall": float(recall_score(y_true_all, y_pred_all, zero_division=0)),
+        "f1": float(f1_score(y_true_all, y_pred_all, zero_division=0)),
+    }
+
+
+def afficher_debug_predictions(
+    nom: str,
+    y_true_all,
+    y_pred_all,
+    prob_pos_samples,
+    max_samples: int = 10,
+) -> None:
+    y_true = np.asarray(y_true_all, dtype=np.int64)
+    y_pred = np.asarray(y_pred_all, dtype=np.int64)
+    prob_pos = np.asarray(prob_pos_samples, dtype=np.float64)
+    valeurs_y, comptes_y = np.unique(y_true, return_counts=True)
+    valeurs_pred, comptes_pred = np.unique(y_pred, return_counts=True)
+
+    print(
+        f"[DEBUG][{nom}] y_true_counts={dict(zip(valeurs_y.tolist(), comptes_y.tolist()))} | "
+        f"y_pred_counts={dict(zip(valeurs_pred.tolist(), comptes_pred.tolist()))}"
+    )
+    print(
+        f"[DEBUG][{nom}] n_pos_labels={int((y_true == 1).sum())} | "
+        f"n_pos_predictions={int((y_pred == 1).sum())}"
+    )
+    print(f"[DEBUG][{nom}] sample_prob_class1={np.round(prob_pos[:max_samples], 6).tolist()}")
+    print(f"[DEBUG][{nom}] sample_pred_labels={y_pred[:max_samples].tolist()}")
+    print(f"[DEBUG][{nom}] sample_true_labels={y_true[:max_samples].tolist()}")
+
+
+def verifier_validation(ds_val) -> None:
+    if ds_val is None:
+        return
+
+    y_val = np.asarray(ds_val.y, dtype=np.int64)
+    if int((y_val == 1).sum()) == 0:
+        print(
+            "[WARN] Validation contient uniquement la classe 0. "
+            "Le F1 de la classe positive sera toujours 0 avec zero_division=0, "
+            "meme si la perte validation est tres faible."
+        )
+
+
 def evaluer_modele(
     model: nn.Module,
     loader,
     criterion: nn.Module,
     device: torch.device,
     max_batches: Optional[int] = None,
+    split_name: str = "eval",
+    debug_metrics: bool = False,
 ) -> Dict[str, float]:
     model.eval()
 
     losses = []
     y_true_all = []
     y_pred_all = []
+    prob_pos_samples = []
 
     with torch.no_grad():
         for i, batch in enumerate(loader):
@@ -129,21 +199,23 @@ def evaluer_modele(
             logits = model(batch)
             loss = criterion(logits, batch.y)
 
-            preds = torch.argmax(logits, dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = torch.argmax(probs, dim=1)
             losses.append(float(loss.item()))
             y_true_all.extend(batch.y.detach().cpu().numpy().tolist())
             y_pred_all.extend(preds.detach().cpu().numpy().tolist())
+            if len(prob_pos_samples) < 10:
+                prob_pos_samples.extend(probs[:, 1].detach().cpu().numpy().tolist())
 
     if not losses:
         return {"loss": float("nan"), "accuracy": float("nan"), "precision": float("nan"), "recall": float("nan"), "f1": float("nan")}
 
-    return {
-        "loss": float(np.mean(losses)),
-        "accuracy": float(accuracy_score(y_true_all, y_pred_all)),
-        "precision": float(precision_score(y_true_all, y_pred_all, zero_division=0)),
-        "recall": float(recall_score(y_true_all, y_pred_all, zero_division=0)),
-        "f1": float(f1_score(y_true_all, y_pred_all, zero_division=0)),
-    }
+    if debug_metrics:
+        afficher_debug_predictions(split_name, y_true_all, y_pred_all, prob_pos_samples)
+
+    metrics = {"loss": float(np.mean(losses))}
+    metrics.update(calculer_metriques_classification(y_true_all, y_pred_all))
+    return metrics
 
 
 def entrainer_une_epoque(
@@ -153,12 +225,14 @@ def entrainer_une_epoque(
     criterion: nn.Module,
     device: torch.device,
     max_batches: Optional[int] = None,
+    debug_metrics: bool = False,
 ) -> Dict[str, float]:
     model.train()
 
     losses = []
     y_true_all = []
     y_pred_all = []
+    prob_pos_samples = []
 
     for i, batch in enumerate(loader_train):
         if max_batches is not None and i >= max_batches:
@@ -172,21 +246,23 @@ def entrainer_une_epoque(
         loss.backward()
         optimizer.step()
 
-        preds = torch.argmax(logits, dim=1)
+        probs = torch.softmax(logits.detach(), dim=1)
+        preds = torch.argmax(probs, dim=1)
         losses.append(float(loss.item()))
         y_true_all.extend(batch.y.detach().cpu().numpy().tolist())
         y_pred_all.extend(preds.detach().cpu().numpy().tolist())
+        if len(prob_pos_samples) < 10:
+            prob_pos_samples.extend(probs[:, 1].detach().cpu().numpy().tolist())
 
     if not losses:
         return {"loss": float("nan"), "accuracy": float("nan"), "precision": float("nan"), "recall": float("nan"), "f1": float("nan")}
 
-    return {
-        "loss": float(np.mean(losses)),
-        "accuracy": float(accuracy_score(y_true_all, y_pred_all)),
-        "precision": float(precision_score(y_true_all, y_pred_all, zero_division=0)),
-        "recall": float(recall_score(y_true_all, y_pred_all, zero_division=0)),
-        "f1": float(f1_score(y_true_all, y_pred_all, zero_division=0)),
-    }
+    if debug_metrics:
+        afficher_debug_predictions("train", y_true_all, y_pred_all, prob_pos_samples)
+
+    metrics = {"loss": float(np.mean(losses))}
+    metrics.update(calculer_metriques_classification(y_true_all, y_pred_all))
+    return metrics
 
 
 def main() -> None:
@@ -212,6 +288,7 @@ def main() -> None:
     # Remplacé dynamiquement par le flag FULL_TRAINING
     parser.add_argument("--max-batches-train", type=int, default=None if FULL_TRAINING else 20, help="Limite debug de batches train.")
     parser.add_argument("--max-batches-val", type=int, default=None if FULL_TRAINING else 5, help="Limite debug de batches val.")
+    parser.add_argument("--debug-metrics", action=argparse.BooleanOptionalAction, default=True, help="Affiche des diagnostics temporaires labels/predictions.")
     args = parser.parse_args()
 
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -252,6 +329,11 @@ def main() -> None:
     print(f"[INFO] in_channels={in_channels}")
     print(f"[INFO] train_size={len(ds_train)} | val_size={len(ds_val) if ds_val else 0} | test_size={len(ds_test) if ds_test else 0}")
     print(f"[INFO] class_weights={class_weights.detach().cpu().numpy().round(4).tolist()}")
+    if args.debug_metrics:
+        afficher_distribution_labels("train", ds_train)
+        afficher_distribution_labels("val", ds_val)
+        afficher_distribution_labels("test", ds_test)
+    verifier_validation(ds_val)
 
     historique = {
         "config": vars(args),
@@ -270,6 +352,7 @@ def main() -> None:
             criterion,
             device,
             max_batches=args.max_batches_train,
+            debug_metrics=args.debug_metrics and epoch == 1,
         )
 
         if loader_val is not None:
@@ -279,6 +362,8 @@ def main() -> None:
                 criterion,
                 device,
                 max_batches=args.max_batches_val,
+                split_name="val",
+                debug_metrics=args.debug_metrics and epoch == 1,
             )
         else:
             val_metrics = {"loss": float("nan"), "accuracy": float("nan"), "precision": float("nan"), "recall": float("nan"), "f1": float("nan")}
@@ -317,7 +402,14 @@ def main() -> None:
             checkpoint = torch.load(best_model_path, map_location=device)
             model.load_state_dict(checkpoint["model_state_dict"])
 
-        test_metrics = evaluer_modele(model, loader_test, criterion, device)
+        test_metrics = evaluer_modele(
+            model,
+            loader_test,
+            criterion,
+            device,
+            split_name="test",
+            debug_metrics=args.debug_metrics,
+        )
         historique["test"] = test_metrics
         print(
             "[TEST] "
