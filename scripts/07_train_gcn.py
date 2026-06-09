@@ -190,8 +190,15 @@ def entrainer_une_epoque(
 
 
 def main() -> None:
+    # ---------------------------------------------------------
+    # FLAG DE DÉBOGAGE / ENTRAÎNEMENT COMPLET
+    # Mets FULL_TRAINING = True pour lancer le vrai entraînement
+    # Mets FULL_TRAINING = False pour un run interactif rapide
+    # ---------------------------------------------------------
+    FULL_TRAINING = True
+
     parser = argparse.ArgumentParser(description="Tâche P: boucle d'entraînement GCN.")
-    parser.add_argument("--epochs", type=int, default=20, help="Nombre d'époques.")
+    parser.add_argument("--epochs", type=int, default=50 if FULL_TRAINING else 2, help="Nombre d'époques.")
     parser.add_argument("--batch-size", type=int, default=32, help="Taille de batch.")
     parser.add_argument("--num-workers", type=int, default=0, help="Workers DataLoader.")
     parser.add_argument("--hidden-channels", type=int, default=64, help="Dimension cachée GCN.")
@@ -201,8 +208,10 @@ def main() -> None:
     parser.add_argument("--weight-decay", type=float, default=1e-4, help="Weight decay Adam.")
     parser.add_argument("--seed", type=int, default=42, help="Graine aléatoire.")
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda"], help="Device d'entraînement.")
-    parser.add_argument("--max-batches-train", type=int, default=None, help="Limite debug de batches train.")
-    parser.add_argument("--max-batches-val", type=int, default=None, help="Limite debug de batches val.")
+    
+    # Remplacé dynamiquement par le flag FULL_TRAINING
+    parser.add_argument("--max-batches-train", type=int, default=None if FULL_TRAINING else 20, help="Limite debug de batches train.")
+    parser.add_argument("--max-batches-val", type=int, default=None if FULL_TRAINING else 5, help="Limite debug de batches val.")
     args = parser.parse_args()
 
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -327,7 +336,7 @@ def main() -> None:
     if best_model_path.exists():
         print(f"[SAVE] Meilleur modèle: {best_model_path}")
 
-    print("\nTâche P prête ✅ Boucle d'entraînement implémentée (Loss + Adam + métriques).")
+    print("\nTache P prete - Boucle d'entrainement implementee (Loss + Adam + metriques).")
 
 
 if __name__ == "__main__":
